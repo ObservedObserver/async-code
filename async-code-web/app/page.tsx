@@ -16,6 +16,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ProtectedRoute } from "@/components/protected-route";
 import { TaskStatusBadge } from "@/components/task-status-badge";
+import { PRStatusBadge } from "@/components/pr-status-badge";
 import { useAuth } from "@/contexts/auth-context";
 import { ApiService } from "@/lib/api-service";
 import { SupabaseService } from "@/lib/supabase-service";
@@ -513,6 +514,15 @@ export default function Home() {
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-2 mb-1">
                                                     <TaskStatusBadge status={task.status || ''} />
+                                                    {task.pr_url && task.pr_number && (
+                                                        <PRStatusBadge 
+                                                            prUrl={task.pr_url}
+                                                            prNumber={task.pr_number}
+                                                            prBranch={task.pr_branch}
+                                                            variant="badge"
+                                                            size="sm"
+                                                        />
+                                                    )}
                                                     <span className="text-xs text-slate-500 flex items-center gap-1">
                                                         #{task.id} • {getAgentIcon(task.agent || '')} {task.agent?.toUpperCase()}
                                                     </span>
