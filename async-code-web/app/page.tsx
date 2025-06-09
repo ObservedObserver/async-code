@@ -22,6 +22,7 @@ import { SupabaseService } from "@/lib/supabase-service";
 import { Project, Task } from "@/types";
 import { ClaudeIcon } from "@/components/icon/claude";
 import { OpenAIIcon } from "@/components/icon/openai";
+import { toast } from "sonner";
 
 interface TaskWithProject extends Task {
     project?: Project
@@ -135,12 +136,12 @@ export default function Home() {
 
     const handleStartTask = async () => {
         if (!prompt.trim() || !githubToken.trim()) {
-            alert('Please provide both a prompt and GitHub token');
+            toast.error('Please provide both a prompt and GitHub token');
             return;
         }
 
         if (!user?.id) {
-            alert('User not authenticated');
+            toast.error('User not authenticated');
             return;
         }
 
@@ -155,7 +156,7 @@ export default function Home() {
             }
         } else {
             // Custom repo URL - would need an input field for this
-            alert('Custom repo URL input not implemented yet. Please select a project or create one first.');
+            toast.error('Custom repo URL input not implemented yet. Please select a project or create one first.');
             return;
         }
 
@@ -196,7 +197,7 @@ export default function Home() {
             setShowNotification(true);
             setTimeout(() => setShowNotification(false), 5000);
         } catch (error) {
-            alert(`Error starting task: ${error}`);
+            toast.error(`Error starting task: ${error}`);
         } finally {
             setIsLoading(false);
         }

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 
 import Link from "next/link";
 
@@ -42,7 +43,7 @@ export default function SettingsPage() {
 
     const handleValidateToken = async () => {
         if (!githubToken.trim() || !repoUrl.trim()) {
-            alert('Please provide both GitHub token and repository URL');
+            toast.error('Please provide both GitHub token and repository URL');
             return;
         }
 
@@ -74,15 +75,15 @@ export default function SettingsPage() {
                 ].join('\n');
                 
                 if (permissions.create_branches) {
-                    alert(`✅ Token is fully valid for PR creation!\n\n${permissionSummary}`);
+                    toast.success(`✅ Token is fully valid for PR creation!\n\n${permissionSummary}`);
                 } else {
-                    alert(`⚠️ Token validation partial success!\n\n${permissionSummary}\n\n❌ Cannot create branches - this will prevent PR creation.\nPlease ensure your token has &apos;repo&apos; scope (not just &apos;public_repo&apos;).`);
+                    toast.warning(`⚠️ Token validation partial success!\n\n${permissionSummary}\n\n❌ Cannot create branches - this will prevent PR creation.\nPlease ensure your token has 'repo' scope (not just 'public_repo').`);
                 }
             } else {
-                alert(`❌ Token validation failed: ${data.error}`);
+                toast.error(`❌ Token validation failed: ${data.error}`);
             }
         } catch (error) {
-            alert(`Error validating token: ${error}`);
+            toast.error(`Error validating token: ${error}`);
             setTokenValidation({ status: 'error', error: String(error) });
         } finally {
             setIsValidatingToken(false);

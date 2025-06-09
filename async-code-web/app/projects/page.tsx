@@ -13,6 +13,7 @@ import { ProtectedRoute } from "@/components/protected-route";
 import { useAuth } from "@/contexts/auth-context";
 import { ApiService } from "@/lib/api-service";
 import { Project } from "@/types";
+import { toast } from "sonner";
 
 interface ProjectWithStats extends Project {
     task_count?: number
@@ -68,7 +69,7 @@ export default function ProjectsPage() {
             loadProjects();
         } catch (error) {
             console.error('Error creating project:', error);
-            alert('Error creating project. Please check the GitHub URL format.');
+            toast.error('Error creating project. Please check the GitHub URL format.');
         }
     };
 
@@ -84,7 +85,7 @@ export default function ProjectsPage() {
             loadProjects();
         } catch (error) {
             console.error('Error deleting project:', error);
-            alert('Error deleting project');
+            toast.error('Error deleting project');
         }
     };
 
