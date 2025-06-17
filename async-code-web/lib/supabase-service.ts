@@ -87,7 +87,10 @@ export class SupabaseService {
     }
 
     // Task operations
-    static async getTasks(projectId?: number): Promise<Task[]> {
+    static async getTasks(projectId?: number, options?: {
+        limit?: number
+        offset?: number
+    }): Promise<Task[]> {
         // Get current authenticated user
         const { data: { user } } = await this.supabase.auth.getUser()
         if (!user) throw new Error('No authenticated user')
@@ -107,6 +110,13 @@ export class SupabaseService {
 
         if (projectId) {
             query = query.eq('project_id', projectId)
+        }
+
+        // Add pagination if options provided
+        if (options?.limit) {
+            const start = options.offset || 0
+            const end = start + options.limit - 1
+            query = query.range(start, end)
         }
 
         const { data, error } = await query.order('created_at', { ascending: false })

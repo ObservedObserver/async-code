@@ -41,6 +41,10 @@ export default function Home() {
     const [isLoading, setIsLoading] = useState(false);
     const [showNotification, setShowNotification] = useState(false);
     const [notificationMessage, setNotificationMessage] = useState("");
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [hasMoreTasks, setHasMoreTasks] = useState(true);
+    const [taskPage, setTaskPage] = useState(0);
+    const TASKS_PER_PAGE = 10;
 
     // Initialize GitHub token from localStorage
     useEffect(() => {
@@ -124,14 +128,47 @@ export default function Home() {
         }
     };
 
-    const loadTasks = async () => {
+    const loadTasks = async (reset: boolean = true) => {
         if (!user?.id) return;
         
         try {
-            const taskData = await SupabaseService.getTasks();
-            setTasks(taskData);
+            const taskData = await SupabaseService.getTasks(undefined, {
+                limit: TASKS_PER_PAGE,
+                offset: 0
+            });
+            
+            if (reset) {
+                setTasks(taskData);
+                setTaskPage(0);
+                setHasMoreTasks(taskData.length === TASKS_PER_PAGE);
+            }
         } catch (error) {
             console.error('Error loading tasks:', error);
+        }
+    };
+
+    const loadMoreTasks = async () => {
+        if (!user?.id || isLoadingMore || !hasMoreTasks) return;
+        
+        try {
+            setIsLoadingMore(true);
+            const nextPage = taskPage + 1;
+            const taskData = await SupabaseService.getTasks(undefined, {
+                limit: TASKS_PER_PAGE,
+                offset: nextPage * TASKS_PER_PAGE
+            });
+            
+            if (taskData.length > 0) {
+                setTasks(prev => [...prev, ...taskData]);
+                setTaskPage(nextPage);
+                setHasMoreTasks(taskData.length === TASKS_PER_PAGE);
+            } else {
+                setHasMoreTasks(false);
+            }
+        } catch (error) {
+            console.error('Error loading more tasks:', error);
+        } finally {
+            setIsLoadingMore(false);
         }
     };
 
@@ -493,15 +530,15 @@ export default function Home() {
                             <CardHeader>
                                 <div className="flex items-center justify-between">
                                     <CardTitle className="text-lg">All Tasks</CardTitle>
-                                    <Link href="/tasks">
-                                        <Button variant="outline" size="sm">View All</Button>
-                                    </Link>
+                                    <div className="text-sm text-slate-500">
+                                        {tasks.length} tasks loaded
+                                    </div>
                                 </div>
                                 <CardDescription>
                                     Track all your automation tasks
                                 </CardDescription>
                             </CardHeader>
-                            <CardContent className="space-y-3 max-h-[500px] overflow-y-auto">
+                            <CardContent className="space-y-3">
                                 {tasks.length === 0 ? (
                                     <div className="text-center py-8 text-slate-500">
                                         <Code2 className="w-8 h-8 mx-auto mb-2 opacity-50" />
@@ -509,60 +546,90 @@ export default function Home() {
                                         <p className="text-xs">Start your first automation above</p>
                                     </div>
                                 ) : (
-                                    tasks.slice(0, 10).map((task) => (
-                                        <div key={task.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <TaskStatusBadge status={task.status || ''} />
-                                                    {task.pr_url && task.pr_number && (
-                                                        <PRStatusBadge 
-                                                            prUrl={task.pr_url}
-                                                            prNumber={task.pr_number}
-                                                            prBranch={task.pr_branch}
-                                                            variant="badge"
-                                                            size="sm"
-                                                        />
-                                                    )}
-                                                    <span className="text-xs text-slate-500 flex items-center gap-1">
-                                                        #{task.id} • {getAgentIcon(task.agent || '')} {task.agent?.toUpperCase()}
-                                                    </span>
+                                    <>
+                                        <div className="space-y-3 max-h-[500px] overflow-y-auto">
+                                            {tasks.map((task) => (
+                                                <div key={task.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 mb-1">
+                                                            <TaskStatusBadge status={task.status || ''} />
+                                                            {task.pr_url && task.pr_number && (
+                                                                <PRStatusBadge 
+                                                                    prUrl={task.pr_url}
+                                                                    prNumber={task.pr_number}
+                                                                    prBranch={task.pr_branch}
+                                                                    variant="badge"
+                                                                    size="sm"
+                                                                />
+                                                            )}
+                                                            <span className="text-xs text-slate-500 flex items-center gap-1">
+                                                                #{task.id} • {getAgentIcon(task.agent || '')} {task.agent?.toUpperCase()}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-sm font-medium text-slate-900 truncate">
+                                                            {(task.chat_messages as any[])?.[0]?.content?.substring(0, 50) || ''}...
+                                                        </p>
+                                                        <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                                                            {task.project ? (
+                                                                <>
+                                                                    <FolderGit2 className="w-3 h-3" />
+                                                                    {task.project.repo_name}
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <Github className="w-3 h-3" />
+                                                                    Custom
+                                                                </>
+                                                            )}
+                                                            <span>•</span>
+                                                            <span>{new Date(task.created_at || '').toLocaleDateString()}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        {task.status === "completed" && (
+                                                            <CheckCircle className="w-4 h-4 text-green-600" />
+                                                        )}
+                                                        {task.status === "running" && (
+                                                            <div className="animate-spin">
+                                                                <AlertCircle className="w-4 h-4 text-blue-600" />
+                                                            </div>
+                                                        )}
+                                                        <Link href={`/tasks/${task.id}`}>
+                                                            <Button variant="ghost" size="sm">
+                                                                <Eye className="w-3 h-3" />
+                                                            </Button>
+                                                        </Link>
+                                                    </div>
                                                 </div>
-                                                <p className="text-sm font-medium text-slate-900 truncate">
-                                                    {(task.chat_messages as any[])?.[0]?.content?.substring(0, 50) || ''}...
-                                                </p>
-                                                <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
-                                                    {task.project ? (
+                                            ))}
+                                        </div>
+                                        
+                                        {/* Load More Button */}
+                                        {hasMoreTasks && (
+                                            <div className="flex justify-center pt-4">
+                                                <Button 
+                                                    onClick={loadMoreTasks}
+                                                    disabled={isLoadingMore}
+                                                    variant="outline"
+                                                    className="gap-2"
+                                                >
+                                                    {isLoadingMore ? (
                                                         <>
-                                                            <FolderGit2 className="w-3 h-3" />
-                                                            {task.project.repo_name}
+                                                            <div className="animate-spin">
+                                                                <AlertCircle className="w-4 h-4" />
+                                                            </div>
+                                                            Loading...
                                                         </>
                                                     ) : (
                                                         <>
-                                                            <Github className="w-3 h-3" />
-                                                            Custom
+                                                            <Plus className="w-4 h-4" />
+                                                            Load More
                                                         </>
                                                     )}
-                                                    <span>•</span>
-                                                    <span>{new Date(task.created_at || '').toLocaleDateString()}</span>
-                                                </div>
+                                                </Button>
                                             </div>
-                                            <div className="flex items-center gap-2">
-                                                {task.status === "completed" && (
-                                                    <CheckCircle className="w-4 h-4 text-green-600" />
-                                                )}
-                                                {task.status === "running" && (
-                                                    <div className="animate-spin">
-                                                        <AlertCircle className="w-4 h-4 text-blue-600" />
-                                                    </div>
-                                                )}
-                                                <Link href={`/tasks/${task.id}`}>
-                                                    <Button variant="ghost" size="sm">
-                                                        <Eye className="w-3 h-3" />
-                                                    </Button>
-                                                </Link>
-                                            </div>
-                                        </div>
-                                    ))
+                                        )}
+                                    </>
                                 )}
                             </CardContent>
                         </Card>
