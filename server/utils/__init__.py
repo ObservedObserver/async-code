@@ -5,7 +5,6 @@ import fcntl
 import queue
 import atexit
 
-# from .code_task_v1 import run_ai_code_task, _run_ai_code_task_internal
 from .code_task_v2 import run_ai_code_task_v2, _run_ai_code_task_v2_internal
 
 # Configure logging
@@ -47,8 +46,6 @@ def init_codex_sequential_processor():
                         # Execute the task
                         if is_v2:
                             _execute_codex_task_v2(task_id, user_id, github_token)
-                        # else:
-                        #     _execute_codex_task_legacy(task_id)
                             
                         logger.info(f"✅ Codex task {task_id} completed")
                         
@@ -85,10 +82,6 @@ def _execute_codex_task_v2(task_id: int, user_id: str, github_token: str):
     # This will contain the actual execution logic
     return _run_ai_code_task_v2_internal(task_id, user_id, github_token)
 
-# def _execute_codex_task_legacy(task_id):
-#     """Execute legacy Codex task - internal method called by sequential processor"""
-#     # This will contain the actual execution logic
-#     return _run_ai_code_task_internal(task_id)
 
 # Cleanup function to stop the worker thread
 def cleanup_codex_processor():
