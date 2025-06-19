@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, Save } from "lucide-react";
 import { toast } from "sonner";
-import { updateUserProfile } from "@/lib/supabase-service";
+import { SupabaseService } from "@/lib/supabase-service";
 import { useUserProfile } from "@/hooks/useUserProfile";
 
 interface CodeAgentConfig {
@@ -87,7 +87,7 @@ export function CodeAgentSettings() {
                 ...preferences,
             };
 
-            await updateUserProfile({ preferences: mergedPrefs });
+            await SupabaseService.updateUserProfile({ preferences: mergedPrefs });
             await refreshProfile();
             toast.success("Code agent settings saved successfully");
         } catch (error) {

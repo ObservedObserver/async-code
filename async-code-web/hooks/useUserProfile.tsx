@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getUserProfile } from "@/lib/supabase-service";
+import { SupabaseService } from "@/lib/supabase-service";
 import { User } from "@/types";
 
 export function useUserProfile() {
@@ -12,7 +12,7 @@ export function useUserProfile() {
     const fetchProfile = useCallback(async () => {
         try {
             setIsLoading(true);
-            const data = await getUserProfile();
+            const data = await SupabaseService.getUserProfile();
             setProfile(data);
             setError(null);
         } catch (err) {

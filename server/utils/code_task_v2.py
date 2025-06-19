@@ -203,6 +203,33 @@ def _run_ai_code_task_v2_internal(task_id: int, user_id: str, github_token: str)
                 logger.info(f"🕐 Adding additional {additional_delay:.1f}s delay due to lock conflict")
                 time.sleep(additional_delay)
         
+        # Load Claude credentials from user preferences in Supabase
+        credentials_content = ""
+        escaped_credentials = ""
+        if model_cli == 'claude':
+            logger.info(f"🔍 Looking for Claude credentials in user preferences for task {task_id}")
+            
+            # Check if user has Claude credentials in their preferences
+            claude_preferences = user_preferences.get('claudeCode', {})
+            if claude_preferences and 'credentials' in claude_preferences:
+                try:
+                    credentials_json = claude_preferences['credentials']
+                    if credentials_json:
+                        # Convert JSON object to string for writing to container
+                        credentials_content = json.dumps(credentials_json)
+                        logger.info(f"📋 Successfully loaded Claude credentials from user preferences and stringified ({len(credentials_content)} characters) for task {task_id}")
+                        # Escape credentials content for shell
+                        escaped_credentials = credentials_content.replace("'", "'\"'\"'").replace('\n', '\\n')
+                        logger.info(f"📋 Credentials content escaped for shell injection")
+                    else:
+                        logger.warning(f"⚠️  Claude credentials field exists but is empty in user preferences for task {task_id}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to process Claude credentials from user preferences: {e}")
+                    credentials_content = ""
+                    escaped_credentials = ""
+            else:
+                logger.info(f"ℹ️  No Claude credentials found in user preferences for task {task_id} - skipping credentials setup")
+        
         # Create the command to run in container (v2 function)
         container_command = f'''
 set -e
@@ -221,8 +248,29 @@ echo "📋 Will extract changes as patch for later PR creation..."
 
 echo "Starting {model_cli.upper()} Code with prompt..."
 
-# Create a temporary file with the prompt
-echo "{escaped_prompt}" > /tmp/prompt.txt
+# Create a temporary file with the prompt using heredoc for proper handling
+cat << 'PROMPT_EOF' > /tmp/prompt.txt
+{prompt}
+PROMPT_EOF
+
+# Setup Claude credentials for Claude tasks
+if [ "{model_cli}" = "claude" ]; then
+    echo "Setting up Claude credentials..."
+    
+    # Create ~/.claude directory if it doesn't exist
+    mkdir -p ~/.claude
+    
+    # Write credentials content directly to file
+    if [ ! -z '{escaped_credentials}' ]; then
+        echo "📋 Writing credentials to ~/.claude/.credentials.json"
+        cat << 'CREDENTIALS_EOF' > ~/.claude/.credentials.json
+{credentials_content}
+CREDENTIALS_EOF
+        echo "✅ Claude credentials configured"
+    else
+        echo "⚠️  No credentials content available"
+    fi
+fi
 
 # Check which CLI tool to use based on model selection
 if [ "{model_cli}" = "codex" ]; then
