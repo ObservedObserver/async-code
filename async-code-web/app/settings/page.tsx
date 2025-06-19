@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Github, CheckCircle, ArrowLeft, Settings, Key, Shield, Info } from "lucide-react";
+import { Github, CheckCircle, ArrowLeft, Settings, Key, Shield, Info, Code } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { CodeAgentSettings } from "@/components/code-agent-settings";
 
 import Link from "next/link";
 
@@ -106,7 +107,7 @@ export default function SettingsPage() {
                             </div>
                             <div>
                                 <h1 className="text-xl font-semibold text-slate-900">Settings</h1>
-                                <p className="text-sm text-slate-500">Configure your GitHub authentication</p>
+                                <p className="text-sm text-slate-500">Configure GitHub authentication and code agent environments</p>
                             </div>
                         </div>
                     </div>
@@ -235,6 +236,9 @@ export default function SettingsPage() {
                             </div>
                         </CardContent>
                     </Card>
+
+                    {/* Code Agent Settings */}
+                    <CodeAgentSettings />
 
                     {/* Token Creation Instructions */}
                     <Card className="bg-blue-50 border-blue-200">

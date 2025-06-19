@@ -142,20 +142,38 @@ def _run_ai_code_task_v2_internal(task_id: int, user_id: str, github_token: str)
         
         # Add model-specific API keys and environment variables
         model_cli = task.get('agent', 'claude')
+        
+        # Get user preferences for custom environment variables
+        user = DatabaseOperations.get_user_by_id(user_id)
+        user_preferences = user.get('preferences', {}) if user else {}
+        
+        if user_preferences:
+            logger.info(f"🔧 Found user preferences for {model_cli}: {list(user_preferences.keys())}")
+        
         if model_cli == 'claude':
-            env_vars.update({
+            # Start with default Claude environment
+            claude_env = {
                 'ANTHROPIC_API_KEY': os.getenv('ANTHROPIC_API_KEY'),
                 'ANTHROPIC_NONINTERACTIVE': '1'  # Custom flag for Anthropic tools
-            })
+            }
+            # Merge with user's custom Claude environment variables
+            if user_preferences.get('claudeCode'):
+                claude_env.update(user_preferences['claudeCode'])
+            env_vars.update(claude_env)
         elif model_cli == 'codex':
-            env_vars.update({
+            # Start with default Codex environment
+            codex_env = {
                 'OPENAI_API_KEY': os.getenv('OPENAI_API_KEY'),
                 'OPENAI_NONINTERACTIVE': '1',  # Custom flag for OpenAI tools
                 'CODEX_QUIET_MODE': '1',  # Official Codex non-interactive flag
                 'CODEX_UNSAFE_ALLOW_NO_SANDBOX': '1',  # Disable Codex internal sandboxing to prevent Docker conflicts
                 'CODEX_DISABLE_SANDBOX': '1',  # Alternative sandbox disable flag
                 'CODEX_NO_SANDBOX': '1'  # Another potential sandbox disable flag
-            })
+            }
+            # Merge with user's custom Codex environment variables
+            if user_preferences.get('codexCLI'):
+                codex_env.update(user_preferences['codexCLI'])
+            env_vars.update(codex_env)
         
         # Use specialized container images based on model
         if model_cli == 'codex':
