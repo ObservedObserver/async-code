@@ -27,22 +27,38 @@ A code agent task management system that provides parallel execution of AI-power
 - **Agents**: Claude Code (Anthropic) with extensible support for other models
 - **Task Management**: Parallel execution system based on container
 
+## Prerequisites
+
+- Docker and Docker Compose installed
+- (Optional) Supabase account for persistent data storage
+
 ## Quick Start
 
-1. **Setup**
+1. **Clone the repository**
    ```bash
    git clone <this-repo>
    cd async-code
-   ./build.sh
    ```
 
-2. **Configure**
-   - Add your Anthropic API key to `server/.env`
-   - Get a GitHub Personal Access Token with repo permissions
+2. **Create the environment file**
+   ```bash
+   cp server/.env.example server/.env
+   ```
+   Edit `server/.env` and set your `ANTHROPIC_API_KEY`. If you are using Supabase, also set `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`.
 
-3. **Run**
+3. **Build and start the stack**
+   ```bash
+   docker-compose up --build -d
+   ```
+
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:5000
+
+## Supabase Setup
+
+1. Create a new project in the [Supabase](https://supabase.com) dashboard.
+2. Open the SQL editor and run `db/init_supabase.sql` to create the required tables.
+3. Grab your project URL, anon key and service role key from **Project Settings → API** and place them in `server/.env`.
 
 ## Usage
 
@@ -58,7 +74,15 @@ A code agent task management system that provides parallel execution of AI-power
 ```bash
 # server/.env
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
+
+# Supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+
+# Flask configuration
 FLASK_ENV=production
+FLASK_DEBUG=False
 ```
 
 
@@ -72,6 +96,18 @@ docker-compose up
 cd async-code-web && npm run dev  # Frontend
 cd server && python main.py      # Backend
 ```
+
+## Production Deployment
+
+1. Set `FLASK_ENV=production` in `server/.env` and export `NODE_ENV=production` before running the stack.
+2. Build and start the containers:
+   ```bash
+   NODE_ENV=production docker-compose up --build -d
+   ```
+3. Monitor the logs with:
+   ```bash
+   docker-compose logs -f
+   ```
 
 
 ## License
