@@ -33,4 +33,4 @@ RUN chmod +x ./setup.sh
 EXPOSE 3000
 
 # Set the default command to run setup.sh
-CMD ["./setup.sh"] 
+CMD ["/bin/bash", "./setup.sh"]
