@@ -269,7 +269,7 @@ if [ "{model_cli}" = "claude" ]; then
     mkdir -p ~/.claude
     
     # Write credentials content directly to file
-    if [ ! -z '{escaped_credentials}' ]; then
+    if [ ! -z "{escaped_credentials}" ]; then
         echo "📋 Writing credentials to ~/.claude/.credentials.json"
         cat << 'CREDENTIALS_EOF' > ~/.claude/.credentials.json
 {credentials_content}
