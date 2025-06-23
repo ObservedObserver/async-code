@@ -243,8 +243,10 @@ def _run_ai_code_task_v2_internal(task_id: int, user_id: str, github_token: str)
 set -e
 echo "Setting up repository..."
 
-# Clone repository
-git clone -b {task['target_branch']} {task['repo_url']} /workspace/repo
+# Clone repository with authentication
+# Convert GitHub URL to use token authentication
+REPO_URL_WITH_TOKEN=$(echo "{task['repo_url']}" | sed "s|https://github.com/|https://{github_token}@github.com/|")
+git clone -b {task['target_branch']} "$REPO_URL_WITH_TOKEN" /workspace/repo
 cd /workspace/repo
 
 # Configure git
