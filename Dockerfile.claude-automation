@@ -7,7 +7,8 @@ RUN apk add --no-cache \
     curl \
     openssh-client \
     python3 \
-    py3-pip
+    py3-pip \
+    file
 
 # Install Claude Code globally
 RUN npm install -g @anthropic-ai/claude-code
