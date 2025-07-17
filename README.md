@@ -18,7 +18,7 @@ A code agent task management system that provides parallel execution of AI-power
 - 🔍 **Agent Comparison**: Compare outputs from different AI models
 - 🐳 **Containerized Execution**: Secure sandboxed environment for each task
 - 🔗 **Git Integration**: Automatic repository cloning, commits, and PR creation
-- **Selfhost**: Deploy you rown parallel code agent platform.
+- **Selfhost**: Deploy your own parallel code agent platform.
 
 ## Architecture
 
