@@ -1,14 +1,12 @@
-import json
-import os
 import logging
 import docker
 import docker.types
 import uuid
 import time
-import random
 from datetime import datetime
 from database import DatabaseOperations
-import fcntl
+from .code_task import MODEL_HANDLERS, claude as claude_module
+from .code_task.common import TaskContext
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -103,8 +101,17 @@ def _run_ai_code_task_v2_internal(task_id: int, user_id: str, github_token: str)
         
         # Update task status to running
         DatabaseOperations.update_task(task_id, user_id, {'status': 'running'})
-        
-        model_name = task.get('agent', 'claude').upper()
+
+        model_cli = str(task.get('agent', 'claude') or 'claude').lower()
+        if model_cli not in MODEL_HANDLERS:
+            logger.warning(
+                "ℹ️  Unknown model '%s' requested for task %s; defaulting to Claude",
+                model_cli,
+                task_id,
+            )
+            model_cli = 'claude'
+
+        model_name = model_cli.upper()
         logger.info(f"🚀 Starting {model_name} Code task {task_id}")
         
         # Get prompt from chat messages
@@ -127,404 +134,57 @@ def _run_ai_code_task_v2_internal(task_id: int, user_id: str, github_token: str)
         logger.info(f"📋 Task details: prompt='{prompt[:50]}...', repo={task['repo_url']}, branch={task['target_branch']}, model={model_name}")
         logger.info(f"Starting {model_name} task {task_id}")
         
-        # Escape special characters in prompt for shell safety
-        escaped_prompt = prompt.replace('"', '\\"').replace('$', '\\$').replace('`', '\\`')
-        
-        # Create container environment variables
-        env_vars = {
-            'CI': 'true',  # Indicate we're in CI/non-interactive environment
-            'TERM': 'dumb',  # Use dumb terminal to avoid interactive features
-            'NO_COLOR': '1',  # Disable colors for cleaner output
-            'FORCE_COLOR': '0',  # Disable colors for cleaner output
-            'NONINTERACTIVE': '1',  # Common flag for non-interactive mode
-            'DEBIAN_FRONTEND': 'noninteractive',  # Non-interactive package installs
+        base_env = {
+            'CI': 'true',
+            'TERM': 'dumb',
+            'NO_COLOR': '1',
+            'FORCE_COLOR': '0',
+            'NONINTERACTIVE': '1',
+            'DEBIAN_FRONTEND': 'noninteractive',
         }
-        
-        # Add model-specific API keys and environment variables
-        model_cli = task.get('agent', 'claude')
-        
-        # Get user preferences for custom environment variables
+
         user = DatabaseOperations.get_user_by_id(user_id)
         user_preferences = user.get('preferences', {}) if user else {}
-        
+
         if user_preferences:
             logger.info(f"🔧 Found user preferences for {model_cli}: {list(user_preferences.keys())}")
-        
-        if model_cli == 'claude':
-            # Start with default Claude environment
-            claude_env = {
-                'ANTHROPIC_API_KEY': os.getenv('ANTHROPIC_API_KEY'),
-                'ANTHROPIC_NONINTERACTIVE': '1'  # Custom flag for Anthropic tools
-            }
-            # Merge with user's custom Claude environment variables
-            claude_config = user_preferences.get('claudeCode', {})
-            if claude_config and claude_config.get('env'):
-                claude_env.update(claude_config['env'])
-            env_vars.update(claude_env)
-        elif model_cli == 'codex':
-            # Start with default Codex environment
-            codex_env = {
-                'OPENAI_API_KEY': os.getenv('OPENAI_API_KEY'),
-                'OPENAI_NONINTERACTIVE': '1',  # Custom flag for OpenAI tools
-                'CODEX_QUIET_MODE': '1',  # Official Codex non-interactive flag
-                'CODEX_UNSAFE_ALLOW_NO_SANDBOX': '1',  # Disable Codex internal sandboxing to prevent Docker conflicts
-                'CODEX_DISABLE_SANDBOX': '1',  # Alternative sandbox disable flag
-                'CODEX_NO_SANDBOX': '1'  # Another potential sandbox disable flag
-            }
-            # Merge with user's custom Codex environment variables
-            codex_config = user_preferences.get('codex', {})
-            if codex_config and codex_config.get('env'):
-                codex_env.update(codex_config['env'])
-            env_vars.update(codex_env)
-        
-        # Use specialized container images based on model
-        if model_cli == 'codex':
-            container_image = 'codex-automation:latest'
-        else:
-            container_image = 'claude-code-automation:latest'
-        
-        # Add staggered start to prevent race conditions with parallel Codex tasks
-        if model_cli == 'codex':
-            # Random delay between 0.5-2 seconds for Codex containers to prevent resource conflicts
-            stagger_delay = random.uniform(0.5, 2.0)
-            logger.info(f"🕐 Adding {stagger_delay:.1f}s staggered start delay for Codex task {task_id}")
-            time.sleep(stagger_delay)
-            
-            # Add file-based locking for Codex to prevent parallel execution conflicts
-            lock_file_path = '/tmp/codex_execution_lock'
-            try:
-                logger.info(f"🔒 Acquiring Codex execution lock for task {task_id}")
-                with open(lock_file_path, 'w') as lock_file:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    logger.info(f"✅ Codex execution lock acquired for task {task_id}")
-                    # Continue with container creation while holding the lock
-            except (IOError, OSError) as e:
-                logger.warning(f"⚠️  Could not acquire Codex execution lock for task {task_id}: {e}")
-                # Add additional delay if lock fails
-                additional_delay = random.uniform(1.0, 3.0)
-                logger.info(f"🕐 Adding additional {additional_delay:.1f}s delay due to lock conflict")
-                time.sleep(additional_delay)
-        
-        # Load Claude credentials from user preferences in Supabase
-        credentials_content = ""
-        escaped_credentials = ""
-        if model_cli == 'claude':
-            logger.info(f"🔍 Looking for Claude credentials in user preferences for task {task_id}")
-            
-            # Check if user has Claude credentials in their preferences
-            claude_config = user_preferences.get('claudeCode', {})
-            credentials_json = claude_config.get('credentials') if claude_config else None
-            
-            # Check if credentials is meaningful (not empty object, null, undefined, or empty string)
-            has_meaningful_credentials = (
-                credentials_json is not None and 
-                credentials_json != {} and 
-                credentials_json != "" and
-                (isinstance(credentials_json, dict) and len(credentials_json) > 0)
+
+        model_module = MODEL_HANDLERS.get(model_cli, claude_module)
+        container_image = getattr(model_module, 'CONTAINER_IMAGE', 'claude-code-automation:latest')
+
+        env_vars = dict(base_env)
+        env_vars.update(model_module.get_environment(user_preferences))
+
+        if hasattr(model_module, 'prepare_for_run'):
+            model_module.prepare_for_run(task_id, logger)
+
+        credentials_content = ''
+        escaped_credentials = ''
+
+        if hasattr(model_module, 'extract_credentials'):
+            logger.info(
+                "🔍 Looking for %s credentials in user preferences for task %s",
+                model_cli.capitalize(),
+                task_id,
             )
-            
-            if has_meaningful_credentials:
-                try:
-                    # Convert JSON object to string for writing to container
-                    credentials_content = json.dumps(credentials_json)
-                    logger.info(f"📋 Successfully loaded Claude credentials from user preferences and stringified ({len(credentials_content)} characters) for task {task_id}")
-                    # Escape credentials content for shell
-                    escaped_credentials = credentials_content.replace("'", "'\"'\"'").replace('\n', '\\n')
-                    logger.info(f"📋 Credentials content escaped for shell injection")
-                except Exception as e:
-                    logger.error(f"❌ Failed to process Claude credentials from user preferences: {e}")
-                    credentials_content = ""
-                    escaped_credentials = ""
-            else:
-                logger.info(f"ℹ️  No meaningful Claude credentials found in user preferences for task {task_id} - skipping credentials setup (credentials: {credentials_json})")
-        
-        # Create the command to run in container (v2 function)
-        container_command = f'''
-set -e
-echo "Setting up repository..."
+            credentials_content, escaped_credentials = model_module.extract_credentials(
+                user_preferences,
+                task_id,
+                logger,
+            )
 
-# Clone repository with authentication
-# Convert GitHub URL to use token authentication
-REPO_URL_WITH_TOKEN=$(echo "{task['repo_url']}" | sed "s|https://github.com/|https://{github_token}@github.com/|")
-git clone -b {task['target_branch']} "$REPO_URL_WITH_TOKEN" /workspace/repo
-cd /workspace/repo
+        context = TaskContext(
+            task_id=task_id,
+            task=task,
+            prompt=prompt,
+            github_token=github_token,
+            model_cli=model_cli,
+            credentials_content=credentials_content,
+            escaped_credentials=escaped_credentials,
+        )
 
-# Configure git
-git config user.email "claude-code@automation.com"
-git config user.name "Claude Code Automation"
+        container_command = model_module.build_command(context)
 
-# We'll extract the patch instead of pushing directly
-echo "📋 Will extract changes as patch for later PR creation..."
-
-echo "Starting {model_cli.upper()} Code with prompt..."
-
-# Create a temporary file with the prompt using heredoc for proper handling
-cat << 'PROMPT_EOF' > /tmp/prompt.txt
-{prompt}
-PROMPT_EOF
-
-# Setup Claude credentials for Claude tasks
-if [ "{model_cli}" = "claude" ]; then
-    echo "Setting up Claude credentials..."
-    
-    # Create ~/.claude directory if it doesn't exist
-    mkdir -p ~/.claude
-    
-    # Write credentials content directly to file
-    if [ ! -z "{escaped_credentials}" ]; then
-        echo "📋 Writing credentials to ~/.claude/.credentials.json"
-        cat << 'CREDENTIALS_EOF' > ~/.claude/.credentials.json
-{credentials_content}
-CREDENTIALS_EOF
-        echo "✅ Claude credentials configured"
-    else
-        echo "⚠️  No credentials content available"
-    fi
-fi
-
-# Check which CLI tool to use based on model selection
-if [ "{model_cli}" = "codex" ]; then
-    echo "Using Codex (OpenAI Codex) CLI..."
-    
-    # Set environment variables for non-interactive mode
-    export CODEX_QUIET_MODE=1
-    export CODEX_UNSAFE_ALLOW_NO_SANDBOX=1
-    export CODEX_DISABLE_SANDBOX=1
-    export CODEX_NO_SANDBOX=1
-    
-    # Debug: Verify environment variables are set
-    echo "=== CODEX DEBUG INFO ==="
-    echo "CODEX_QUIET_MODE: $CODEX_QUIET_MODE"
-    echo "CODEX_UNSAFE_ALLOW_NO_SANDBOX: $CODEX_UNSAFE_ALLOW_NO_SANDBOX"
-    echo "OPENAI_API_KEY: $(echo $OPENAI_API_KEY | head -c 8)..."
-    echo "USING OFFICIAL CODEX FLAGS: --approval-mode full-auto --quiet for non-interactive operation"
-    echo "======================="
-    
-    # Read the prompt from file
-    PROMPT_TEXT=$(cat /tmp/prompt.txt)
-    
-    # Check for codex installation
-    if [ -f /usr/local/bin/codex ]; then
-        echo "Found codex at /usr/local/bin/codex"
-        echo "Running Codex in non-interactive mode..."
-        
-        # Use official non-interactive flags for Docker environment
-        # Using --approval-mode full-auto as per official Codex documentation
-        # Also disable Codex's internal sandboxing to prevent conflicts with Docker
-        /usr/local/bin/codex --approval-mode full-auto --quiet "$PROMPT_TEXT"
-        CODEX_EXIT_CODE=$?
-        echo "Codex finished with exit code: $CODEX_EXIT_CODE"
-        
-        if [ $CODEX_EXIT_CODE -ne 0 ]; then
-            echo "ERROR: Codex failed with exit code $CODEX_EXIT_CODE"
-            exit $CODEX_EXIT_CODE
-        fi
-        
-        echo "✅ Codex completed successfully"
-    elif command -v codex >/dev/null 2>&1; then
-        echo "Using codex from PATH..."
-        echo "Running Codex in non-interactive mode..."
-        
-        # Use official non-interactive flags for Docker environment
-        # Using --approval-mode full-auto as per official Codex documentation
-        # Also disable Codex's internal sandboxing to prevent conflicts with Docker
-        codex --approval-mode full-auto --quiet "$PROMPT_TEXT"
-        CODEX_EXIT_CODE=$?
-        echo "Codex finished with exit code: $CODEX_EXIT_CODE"
-        
-        if [ $CODEX_EXIT_CODE -ne 0 ]; then
-            echo "ERROR: Codex failed with exit code $CODEX_EXIT_CODE"
-            exit $CODEX_EXIT_CODE
-        fi
-        
-        echo "✅ Codex completed successfully"
-    else
-        echo "ERROR: codex command not found anywhere"
-        echo "Please ensure Codex CLI is installed in the container"
-        exit 1
-    fi
-    
-else
-    echo "Using Claude CLI..."
-    
-    # Try different ways to invoke claude
-    echo "Checking claude installation..."
-
-if [ -f /usr/local/bin/claude ]; then
-    echo "Found claude at /usr/local/bin/claude"
-    echo "File type:"
-    file /usr/local/bin/claude || echo "file command not available"
-    echo "First few lines:"
-    head -5 /usr/local/bin/claude || echo "head command failed"
-    
-    # Check if it's a shell script
-    if head -1 /usr/local/bin/claude | grep -q "#!/bin/sh\|#!/bin/bash\|#!/usr/bin/env bash"; then
-        echo "Detected shell script, running with sh..."
-        sh /usr/local/bin/claude < /tmp/prompt.txt
-    # Check if it's a Node.js script (including env -S node pattern)
-    elif head -1 /usr/local/bin/claude | grep -q "#!/usr/bin/env.*node\|#!/usr/bin/node"; then
-        echo "Detected Node.js script..."
-        if command -v node >/dev/null 2>&1; then
-            echo "Running with node..."
-            # Try different approaches for Claude CLI
-            
-            # First try with --help to see available options
-            echo "Checking claude options..."
-            node /usr/local/bin/claude --help 2>/dev/null || echo "Help not available"
-            
-            # Try non-interactive approaches
-            echo "Attempting non-interactive execution..."
-            
-            # Method 1: Use the official --print flag for non-interactive mode
-            echo "Using --print flag for non-interactive mode..."
-            cat /tmp/prompt.txt | node /usr/local/bin/claude --print --allowedTools "Edit,Bash"
-            CLAUDE_EXIT_CODE=$?
-            echo "Claude Code finished with exit code: $CLAUDE_EXIT_CODE"
-            
-            if [ $CLAUDE_EXIT_CODE -ne 0 ]; then
-                echo "ERROR: Claude Code failed with exit code $CLAUDE_EXIT_CODE"
-                exit $CLAUDE_EXIT_CODE
-            fi
-            
-            echo "✅ Claude Code completed successfully"
-        else
-            echo "Node.js not found, trying direct execution..."
-            /usr/local/bin/claude < /tmp/prompt.txt
-            CLAUDE_EXIT_CODE=$?
-            echo "Claude Code finished with exit code: $CLAUDE_EXIT_CODE"
-            if [ $CLAUDE_EXIT_CODE -ne 0 ]; then
-                echo "ERROR: Claude Code failed with exit code $CLAUDE_EXIT_CODE"
-                exit $CLAUDE_EXIT_CODE
-            fi
-            echo "✅ Claude Code completed successfully"
-        fi
-    # Check if it's a Python script
-    elif head -1 /usr/local/bin/claude | grep -q "#!/usr/bin/env python\|#!/usr/bin/python"; then
-        echo "Detected Python script..."
-        if command -v python3 >/dev/null 2>&1; then
-            echo "Running with python3..."
-            python3 /usr/local/bin/claude < /tmp/prompt.txt
-            CLAUDE_EXIT_CODE=$?
-        elif command -v python >/dev/null 2>&1; then
-            echo "Running with python..."
-            python /usr/local/bin/claude < /tmp/prompt.txt
-            CLAUDE_EXIT_CODE=$?
-        else
-            echo "Python not found, trying direct execution..."
-            /usr/local/bin/claude < /tmp/prompt.txt
-            CLAUDE_EXIT_CODE=$?
-        fi
-        echo "Claude Code finished with exit code: $CLAUDE_EXIT_CODE"
-        if [ $CLAUDE_EXIT_CODE -ne 0 ]; then
-            echo "ERROR: Claude Code failed with exit code $CLAUDE_EXIT_CODE"
-            exit $CLAUDE_EXIT_CODE
-        fi
-        echo "✅ Claude Code completed successfully"
-    else
-        echo "Unknown script type, trying direct execution..."
-        /usr/local/bin/claude < /tmp/prompt.txt
-        CLAUDE_EXIT_CODE=$?
-        echo "Claude Code finished with exit code: $CLAUDE_EXIT_CODE"
-        if [ $CLAUDE_EXIT_CODE -ne 0 ]; then
-            echo "ERROR: Claude Code failed with exit code $CLAUDE_EXIT_CODE"
-            exit $CLAUDE_EXIT_CODE
-        fi
-        echo "✅ Claude Code completed successfully"
-    fi
-elif command -v claude >/dev/null 2>&1; then
-    echo "Using claude from PATH..."
-    CLAUDE_PATH=$(which claude)
-    echo "Claude found at: $CLAUDE_PATH"
-    claude < /tmp/prompt.txt
-    CLAUDE_EXIT_CODE=$?
-    echo "Claude Code finished with exit code: $CLAUDE_EXIT_CODE"
-    if [ $CLAUDE_EXIT_CODE -ne 0 ]; then
-        echo "ERROR: Claude Code failed with exit code $CLAUDE_EXIT_CODE"
-        exit $CLAUDE_EXIT_CODE
-    fi
-    echo "✅ Claude Code completed successfully"
-else
-    echo "ERROR: claude command not found anywhere"
-    echo "Checking available interpreters:"
-    which python3 2>/dev/null && echo "python3: available" || echo "python3: not found"
-    which python 2>/dev/null && echo "python: available" || echo "python: not found"
-    which node 2>/dev/null && echo "node: available" || echo "node: not found"
-    which sh 2>/dev/null && echo "sh: available" || echo "sh: not found"
-    exit 1
-fi
-
-fi  # End of model selection (claude vs codex)
-
-# Check if there are changes
-if git diff --quiet; then
-    echo "ℹ️  No changes made by {model_cli.upper()} - this is a valid outcome"
-    echo "The AI tool ran successfully but decided not to make changes"
-    
-    # Create empty patch and diff for consistency
-    echo "=== PATCH START ==="
-    echo "No changes were made"
-    echo "=== PATCH END ==="
-    
-    echo "=== GIT DIFF START ==="
-    echo "No changes were made"
-    echo "=== GIT DIFF END ==="
-    
-    echo "=== CHANGED FILES START ==="
-    echo "No files were changed"
-    echo "=== CHANGED FILES END ==="
-    
-    echo "=== FILE CHANGES START ==="
-    echo "No file changes to display"
-    echo "=== FILE CHANGES END ==="
-    
-    # Set empty commit hash
-    echo "COMMIT_HASH="
-else
-    # Commit changes locally
-    git add .
-    git commit -m "{model_cli.capitalize()}: {escaped_prompt[:100]}"
-
-    # Get commit info
-    COMMIT_HASH=$(git rev-parse HEAD)
-    echo "COMMIT_HASH=$COMMIT_HASH"
-
-    # Generate patch file for later application
-    echo "📦 Generating patch file..."
-    git format-patch HEAD~1 --stdout > /tmp/changes.patch
-    echo "=== PATCH START ==="
-    cat /tmp/changes.patch
-    echo "=== PATCH END ==="
-
-    # Also get the diff for display
-    echo "=== GIT DIFF START ==="
-    git diff HEAD~1 HEAD
-    echo "=== GIT DIFF END ==="
-
-    # List changed files for reference
-    echo "=== CHANGED FILES START ==="
-    git diff --name-only HEAD~1 HEAD
-    echo "=== CHANGED FILES END ==="
-
-    # Get before/after content for merge view
-    echo "=== FILE CHANGES START ==="
-    for file in $(git diff --name-only HEAD~1 HEAD); do
-        echo "FILE: $file"
-        echo "=== BEFORE START ==="
-        git show HEAD~1:"$file" 2>/dev/null || echo "FILE_NOT_EXISTS"
-        echo "=== BEFORE END ==="
-        echo "=== AFTER START ==="
-        cat "$file" 2>/dev/null || echo "FILE_DELETED"
-        echo "=== AFTER END ==="
-        echo "=== FILE END ==="
-    done
-    echo "=== FILE CHANGES END ==="
-fi
-
-# Explicitly exit with success code
-echo "Container work completed successfully"
-exit 0
-'''
-        
         # Run container with unified AI Code tools (supports both Claude and Codex)
         logger.info(f"🐳 Creating Docker container for task {task_id} using {container_image} (model: {model_name})")
         
@@ -545,20 +205,16 @@ exit 0
             'ulimits': [docker.types.Ulimit(name='nofile', soft=1024, hard=2048)]  # File descriptor limits
         }
         
-        # Add essential Docker configuration for Codex compatibility
-        if model_cli == 'codex':
-            logger.warning(f"⚠️  Running Codex with enhanced Docker privileges to bypass seccomp/landlock restrictions")
-            container_kwargs.update({
-                # Essential security options for Codex compatibility
-                'security_opt': [
-                    'seccomp=unconfined',      # Disable seccomp to prevent syscall filtering conflicts
-                    'apparmor=unconfined',     # Disable AppArmor MAC controls
-                    'no-new-privileges=false'  # Allow privilege escalation needed by Codex
-                ],
-                'cap_add': ['ALL'],            # Grant all Linux capabilities
-                'privileged': True,            # Run in fully privileged mode
-                'pid_mode': 'host'            # Share host PID namespace
-            })
+        container_overrides = {}
+        if hasattr(model_module, 'get_container_overrides'):
+            container_overrides = model_module.get_container_overrides() or {}
+
+        if container_overrides:
+            if model_cli == 'codex':
+                logger.warning(
+                    "⚠️  Running Codex with enhanced Docker privileges to bypass seccomp/landlock restrictions"
+                )
+            container_kwargs.update(container_overrides)
         
         # Retry container creation with enhanced conflict handling
         container = None
